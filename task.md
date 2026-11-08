@@ -10,4 +10,4 @@
 - [x] Add granular settings breakdown for window and split pane controls <!-- id: 7 -->
 - [x] Implement individual handlers/guards based on granular settings <!-- id: 8 -->
 - [x] Build and verify plugin <!-- id: 9 -->
-- [ ] Commit and push granular settings update to GitHub <!-- id: 10 -->
+- [x] Commit and push granular settings update to GitHub <!-- id: 10 -->
