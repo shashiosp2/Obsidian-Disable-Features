@@ -6,5 +6,8 @@
 - [x] Scaffold Obsidian plugin structure (manifest.json, package.json, tsconfig.json, esbuild.config.js, main.ts) <!-- id: 3 -->
 - [x] Implement window / popout disabling (block `workspace.openPopoutLeaf`, drag-to-window, commands, context menus) <!-- id: 4 -->
 - [x] Implement split pane disabling (block `workspace.splitActiveLeaf`, split commands, context menus, dragging to split) <!-- id: 5 -->
-- [x] Add plugin settings tab with toggles for disabling windows and split panes <!-- id: 6 -->
-- [x] Build plugin and verify compilation <!-- id: 7 -->
+- [x] Add initial plugin settings tab <!-- id: 6 -->
+- [x] Add granular settings breakdown for window and split pane controls <!-- id: 7 -->
+- [x] Implement individual handlers/guards based on granular settings <!-- id: 8 -->
+- [x] Build and verify plugin <!-- id: 9 -->
+- [ ] Commit and push granular settings update to GitHub <!-- id: 10 -->

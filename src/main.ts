@@ -1,10 +1,9 @@
 import {
-  App,
   Menu,
   MenuItem,
   Notice,
   Plugin,
-  Workspace,
+  SplitDirection,
   WorkspaceLeaf,
   WorkspaceWindow,
 } from "obsidian";
@@ -44,44 +43,55 @@ export default class DisableFeaturesPlugin extends Plugin {
       try {
         unpatch();
       } catch (e) {
-        console.error("Error during unpatch:", e);
+        console.error("[disable-features] Error during unpatch:", e);
       }
     }
     this.unpatches = [];
   }
 
   applySettings() {
-    // Clean up previous patches before reapplying
     this.unpatchAll();
 
     this.patchMenuHandling();
     this.patchCommands();
 
     if (this.settings.disablePopoutWindows) {
-      this.enableDisablePopoutWindows();
+      this.applyPopoutWindowRestrictions();
     }
 
     if (this.settings.disableSplitPanes) {
-      this.enableDisableSplitPanes();
+      this.applySplitPaneRestrictions();
+    }
+  }
+
+  private notify(msg: string) {
+    if (this.settings.showNotificationOnBlock) {
+      new Notice(`[Disable Features] ${msg}`);
     }
   }
 
   /**
-   * Disables opening leaves in floating/popout OS windows and forces them into tabs.
+   * Applies granular popout window restrictions
    */
-  private enableDisablePopoutWindows() {
+  private applyPopoutWindowRestrictions() {
     const workspace = this.app.workspace as any;
+    const plugin = this;
 
-    // 1. Intercept getLeaf('window') -> redirect to getLeaf('tab')
+    // 1. Intercept getLeaf('window')
     if (typeof workspace.getLeaf === "function") {
       const origGetLeaf = workspace.getLeaf;
-      const plugin = this;
       workspace.getLeaf = function (
         type?: any,
         ...args: any[]
       ): WorkspaceLeaf {
         if (plugin.settings.disablePopoutWindows && type === "window") {
-          return origGetLeaf.call(this, "tab", ...args);
+          if (plugin.settings.redirectPopoutToTab) {
+            plugin.notify("Popout window redirected to tab.");
+            return origGetLeaf.call(this, "tab", ...args);
+          } else {
+            plugin.notify("Popout window creation blocked.");
+            return origGetLeaf.call(this, false, ...args);
+          }
         }
         return origGetLeaf.call(this, type, ...args);
       };
@@ -93,13 +103,17 @@ export default class DisableFeaturesPlugin extends Plugin {
     // 2. Intercept openPopoutLeaf
     if (typeof workspace.openPopoutLeaf === "function") {
       const origOpenPopoutLeaf = workspace.openPopoutLeaf;
-      const plugin = this;
       workspace.openPopoutLeaf = function (
         ...args: any[]
       ): WorkspaceLeaf {
         if (plugin.settings.disablePopoutWindows) {
-          // Open in a standard tab leaf instead
-          return workspace.getLeaf("tab");
+          if (plugin.settings.redirectPopoutToTab) {
+            plugin.notify("Popout window redirected to tab.");
+            return workspace.getLeaf("tab");
+          } else {
+            plugin.notify("Popout window creation blocked.");
+            return workspace.getLeaf(false);
+          }
         }
         return origOpenPopoutLeaf.apply(this, args);
       };
@@ -111,13 +125,12 @@ export default class DisableFeaturesPlugin extends Plugin {
     // 3. Intercept moveLeafToPopout
     if (typeof workspace.moveLeafToPopout === "function") {
       const origMoveLeafToPopout = workspace.moveLeafToPopout;
-      const plugin = this;
       workspace.moveLeafToPopout = function (
         leaf: WorkspaceLeaf,
         ...args: any[]
       ): any {
         if (plugin.settings.disablePopoutWindows) {
-          new Notice("Popout windows are disabled.");
+          plugin.notify("Moving leaf to popout window blocked.");
           return null;
         }
         return origMoveLeafToPopout.call(this, leaf, ...args);
@@ -128,43 +141,69 @@ export default class DisableFeaturesPlugin extends Plugin {
     }
 
     // 4. Close any already existing or newly opening popout window and move leaves to main workspace
-    this.closeExistingPopouts();
+    if (this.settings.autoCloseExistingPopouts) {
+      this.closeExistingPopouts();
 
-    const windowOpenRef = this.app.workspace.on(
-      // @ts-ignore
-      "window-open",
-      (win: WorkspaceWindow, _window: Window) => {
-        if (this.settings.disablePopoutWindows) {
-          this.dockPopoutWindowLeaves(win);
+      const windowOpenRef = this.app.workspace.on(
+        // @ts-ignore
+        "window-open",
+        (win: WorkspaceWindow, _window: Window) => {
+          if (
+            this.settings.disablePopoutWindows &&
+            this.settings.autoCloseExistingPopouts
+          ) {
+            this.dockPopoutWindowLeaves(win);
+          }
         }
-      }
-    );
-    this.unpatches.push(() => {
-      this.app.workspace.offref(windowOpenRef);
-    });
-
-    // 5. Intercept dragend / drop behavior that detaches a leaf to popout window
-    this.registerWindowDropGuard();
+      );
+      this.unpatches.push(() => {
+        this.app.workspace.offref(windowOpenRef);
+      });
+    }
   }
 
   /**
-   * Disables splitting panes vertically or horizontally.
+   * Applies granular split pane restrictions
    */
-  private enableDisableSplitPanes() {
+  private applySplitPaneRestrictions() {
     const workspace = this.app.workspace as any;
+    const plugin = this;
 
-    // 1. Intercept getLeaf('split') or getLeaf(true) -> redirect to getLeaf('tab')
+    const isSplitDisallowed = (direction?: SplitDirection) => {
+      if (!plugin.settings.disableSplitPanes) return false;
+      if (direction === "vertical" && plugin.settings.disableSplitVertical) {
+        return true;
+      }
+      if (direction === "horizontal" && plugin.settings.disableSplitHorizontal) {
+        return true;
+      }
+      if (!direction) {
+        return (
+          plugin.settings.disableSplitVertical ||
+          plugin.settings.disableSplitHorizontal
+        );
+      }
+      return false;
+    };
+
+    // 1. Intercept getLeaf('split') or getLeaf(true)
     if (typeof workspace.getLeaf === "function") {
       const origGetLeaf = workspace.getLeaf;
-      const plugin = this;
       workspace.getLeaf = function (
         type?: any,
-        direction?: any,
+        direction?: SplitDirection,
         ...args: any[]
       ): WorkspaceLeaf {
         if (plugin.settings.disableSplitPanes) {
           if (type === "split" || type === true) {
-            return origGetLeaf.call(this, "tab", ...args);
+            if (isSplitDisallowed(direction)) {
+              if (plugin.settings.redirectSplitToTab) {
+                return origGetLeaf.call(this, "tab", ...args);
+              } else {
+                plugin.notify("Pane split blocked.");
+                return origGetLeaf.call(this, false, ...args);
+              }
+            }
           }
         }
         return origGetLeaf.call(this, type, direction, ...args);
@@ -177,14 +216,19 @@ export default class DisableFeaturesPlugin extends Plugin {
     // 2. Intercept splitActiveLeaf
     if (typeof workspace.splitActiveLeaf === "function") {
       const origSplitActiveLeaf = workspace.splitActiveLeaf;
-      const plugin = this;
       workspace.splitActiveLeaf = function (
+        direction?: SplitDirection,
         ...args: any[]
       ): WorkspaceLeaf {
-        if (plugin.settings.disableSplitPanes) {
-          return workspace.getLeaf("tab");
+        if (plugin.settings.disableSplitPanes && isSplitDisallowed(direction)) {
+          if (plugin.settings.redirectSplitToTab) {
+            return workspace.getLeaf("tab");
+          } else {
+            plugin.notify("Pane split blocked.");
+            return workspace.getLeaf(false);
+          }
         }
-        return origSplitActiveLeaf.apply(this, args);
+        return origSplitActiveLeaf.call(this, direction, ...args);
       };
       this.unpatches.push(() => {
         workspace.splitActiveLeaf = origSplitActiveLeaf;
@@ -194,14 +238,20 @@ export default class DisableFeaturesPlugin extends Plugin {
     // 3. Intercept createLeafBySplit
     if (typeof workspace.createLeafBySplit === "function") {
       const origCreateLeafBySplit = workspace.createLeafBySplit;
-      const plugin = this;
       workspace.createLeafBySplit = function (
+        leaf: WorkspaceLeaf,
+        direction?: SplitDirection,
         ...args: any[]
       ): WorkspaceLeaf {
-        if (plugin.settings.disableSplitPanes) {
-          return workspace.getLeaf("tab");
+        if (plugin.settings.disableSplitPanes && isSplitDisallowed(direction)) {
+          if (plugin.settings.redirectSplitToTab) {
+            return workspace.getLeaf("tab");
+          } else {
+            plugin.notify("Pane split blocked.");
+            return leaf;
+          }
         }
-        return origCreateLeafBySplit.apply(this, args);
+        return origCreateLeafBySplit.call(this, leaf, direction, ...args);
       };
       this.unpatches.push(() => {
         workspace.createLeafBySplit = origCreateLeafBySplit;
@@ -211,18 +261,21 @@ export default class DisableFeaturesPlugin extends Plugin {
     // 4. Intercept duplicateLeaf
     if (typeof workspace.duplicateLeaf === "function") {
       const origDuplicateLeaf = workspace.duplicateLeaf;
-      const plugin = this;
       workspace.duplicateLeaf = function (
         leaf: WorkspaceLeaf,
         leafType?: any,
+        direction?: SplitDirection,
         ...args: any[]
       ): Promise<WorkspaceLeaf> {
-        if (plugin.settings.disableSplitPanes) {
+        if (
+          plugin.settings.disableSplitPanes &&
+          plugin.settings.preventSplitOnDuplicate
+        ) {
           if (leafType === "split" || leafType === true || leafType === undefined) {
             leafType = "tab";
           }
         }
-        return origDuplicateLeaf.call(this, leaf, leafType, ...args);
+        return origDuplicateLeaf.call(this, leaf, leafType, direction, ...args);
       };
       this.unpatches.push(() => {
         workspace.duplicateLeaf = origDuplicateLeaf;
@@ -243,11 +296,14 @@ export default class DisableFeaturesPlugin extends Plugin {
         return origAddItem.call(this, (item: MenuItem) => {
           cb(item);
 
-          // We check the item's title or callback to determine if it should be suppressed
           const itemAny = item as any;
           const title = (itemAny.title || "").toString().toLowerCase();
 
-          if (plugin.settings.disablePopoutWindows) {
+          // Granular Popout Window Menu Filtering
+          if (
+            plugin.settings.disablePopoutWindows &&
+            plugin.settings.hideWindowContextMenuItems
+          ) {
             if (
               title.includes("open in new window") ||
               title.includes("move to new window") ||
@@ -263,12 +319,22 @@ export default class DisableFeaturesPlugin extends Plugin {
             }
           }
 
-          if (plugin.settings.disableSplitPanes) {
+          // Granular Split Panes Menu Filtering
+          if (
+            plugin.settings.disableSplitPanes &&
+            plugin.settings.hideSplitContextMenuItems
+          ) {
+            const isVerticalMenu =
+              title.includes("split right") || title.includes("split vertically");
+            const isHorizontalMenu =
+              title.includes("split down") || title.includes("split horizontally");
+
             if (
-              title.includes("split right") ||
-              title.includes("split down") ||
-              title.includes("split vertically") ||
-              title.includes("split horizontally")
+              (isVerticalMenu && plugin.settings.disableSplitVertical) ||
+              (isHorizontalMenu && plugin.settings.disableSplitHorizontal) ||
+              ((isVerticalMenu || isHorizontalMenu) &&
+                plugin.settings.disableSplitVertical &&
+                plugin.settings.disableSplitHorizontal)
             ) {
               if (typeof item.setDisabled === "function") {
                 item.setDisabled(true);
@@ -303,26 +369,49 @@ export default class DisableFeaturesPlugin extends Plugin {
       commandId: string,
       ...args: any[]
     ) {
-      if (plugin.settings.disablePopoutWindows) {
+      // Window Commands
+      if (
+        plugin.settings.disablePopoutWindows &&
+        plugin.settings.disableWindowCommands
+      ) {
         const popoutCommands = [
           "workspace:open-in-new-window",
           "workspace:move-to-new-window",
         ];
         if (popoutCommands.includes(commandId)) {
-          new Notice("Popout windows are disabled.");
+          plugin.notify("Popout window commands are disabled.");
           return false;
         }
       }
 
-      if (plugin.settings.disableSplitPanes) {
-        const splitCommands = [
-          "workspace:split-vertical",
-          "workspace:split-horizontal",
-        ];
-        if (splitCommands.includes(commandId)) {
-          // Open in a new tab instead of splitting
-          app.workspace.getLeaf("tab");
-          new Notice("Splitting is disabled. Opened in new tab instead.");
+      // Split Commands
+      if (
+        plugin.settings.disableSplitPanes &&
+        plugin.settings.disableSplitCommands
+      ) {
+        if (
+          commandId === "workspace:split-vertical" &&
+          plugin.settings.disableSplitVertical
+        ) {
+          if (plugin.settings.redirectSplitToTab) {
+            app.workspace.getLeaf("tab");
+            plugin.notify("Vertical split redirected to a new tab.");
+          } else {
+            plugin.notify("Vertical split command is disabled.");
+          }
+          return true;
+        }
+
+        if (
+          commandId === "workspace:split-horizontal" &&
+          plugin.settings.disableSplitHorizontal
+        ) {
+          if (plugin.settings.redirectSplitToTab) {
+            app.workspace.getLeaf("tab");
+            plugin.notify("Horizontal split redirected to a new tab.");
+          } else {
+            plugin.notify("Horizontal split command is disabled.");
+          }
           return true;
         }
       }
@@ -355,12 +444,12 @@ export default class DisableFeaturesPlugin extends Plugin {
         leaf.detach();
       }
 
-      // Close popout window if possible
       if (typeof (win as any).win?.close === "function") {
         (win as any).win.close();
       }
+      this.notify("Popout window closed and docked to tabs.");
     } catch (e) {
-      console.error("Failed to dock popout leaf:", e);
+      console.error("[disable-features] Failed to dock popout leaf:", e);
     }
   }
 
@@ -375,21 +464,5 @@ export default class DisableFeaturesPlugin extends Plugin {
         this.dockPopoutWindowLeaves(win);
       }
     }
-  }
-
-  /**
-   * Guard drag-and-drop actions that could try to drop outside Obsidian to spawn a window
-   */
-  private registerWindowDropGuard() {
-    const handleDragOver = (evt: DragEvent) => {
-      // Prevent leaves from creating external windows if dragged out
-      if (this.settings.disablePopoutWindows) {
-        // Can inspect dataTransfer types if needed
-      }
-    };
-    window.addEventListener("dragover", handleDragOver, true);
-    this.unpatches.push(() => {
-      window.removeEventListener("dragover", handleDragOver, true);
-    });
   }
 }
