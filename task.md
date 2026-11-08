@@ -13,3 +13,4 @@
 - [x] Implement sidebar tab flattening (no top/bottom splits) <!-- id: 12 -->
 - [x] Build and verify plugin <!-- id: 9 -->
 - [x] Commit and push changes to GitHub <!-- id: 10 -->
+- [x] Copy plugin files into vault and enable in `community-plugins.json` <!-- id: 13 -->
