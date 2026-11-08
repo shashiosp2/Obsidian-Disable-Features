@@ -6,6 +6,12 @@ An Obsidian plugin that disables specific features (such as popout windows and s
 
 All settings can be individually configured under Obsidian **Settings -> Community Plugins -> Disable Features**:
 
+### Sidebar Configuration (Desktop & Mobile)
+- **Enforce Single Sidebar**: Consolidates all sidebar views onto one active side (Left or Right) and completely collapses & disables the other side.
+- **Active Sidebar Side**: Choose whether the single active sidebar is **Left** or **Right**. Any attempt by Obsidian or plugins to create or reveal a leaf in the disabled sidebar is seamlessly diverted into this active side.
+- **Hide Disabled Sidebar Toggle Buttons**: Hides the UI ribbon icons and toggle buttons for the disabled sidebar.
+- **Flatten Sidebar Tabs (No Top/Bottom Splits)**: Eliminates vertical split stacking inside sidebars. All sidebar views are placed in a single horizontal tab strip so you can cleanly cycle through all of them left-to-right without multi-level splits.
+
 ### Popout / Floating Windows
 - **Disable Popout Windows (Master Switch)**: Prevents opening notes as separate OS windows.
 - **Redirect Popout Requests to Tabs**: When enabled, any request to open a window creates a new tab instead of failing silently.

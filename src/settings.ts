@@ -18,6 +18,12 @@ export interface DisableFeaturesSettings {
   disableSplitCommands: boolean;
   preventSplitOnDuplicate: boolean;
 
+  // Sidebar Features
+  enforceSingleSidebar: boolean;
+  allowedSidebarSide: "left" | "right";
+  flattenSidebarTabs: boolean;
+  hideDisabledSidebarRibbonButtons: boolean;
+
   // Feedback notifications
   showNotificationOnBlock: boolean;
 }
@@ -38,6 +44,12 @@ export const DEFAULT_SETTINGS: DisableFeaturesSettings = {
   hideSplitContextMenuItems: true,
   disableSplitCommands: true,
   preventSplitOnDuplicate: true,
+
+  // Sidebar Features
+  enforceSingleSidebar: true,
+  allowedSidebarSide: "left",
+  flattenSidebarTabs: true,
+  hideDisabledSidebarRibbonButtons: true,
 
   // Feedback notifications
   showNotificationOnBlock: true,
@@ -64,13 +76,75 @@ export class DisableFeaturesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Show Notification on Block")
-      .setDesc("Display an in-app notice when a disallowed window or split action is blocked or redirected.")
+      .setDesc("Display an in-app notice when a disallowed window, split, or sidebar action is blocked or redirected.")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.showNotificationOnBlock)
           .onChange(async (value) => {
             this.plugin.settings.showNotificationOnBlock = value;
             await this.plugin.saveSettings();
+          })
+      );
+
+    // ==========================================
+    // SIDEBAR CONSOLIDATION & FLATTENING
+    // ==========================================
+    containerEl.createEl("h2", { text: "Sidebar Configuration" });
+
+    new Setting(containerEl)
+      .setName("Enforce Single Sidebar")
+      .setDesc("Force everything into one sidebar side (Left or Right) and completely disable the other side. Works on Desktop and Mobile.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.enforceSingleSidebar)
+          .onChange(async (value) => {
+            this.plugin.settings.enforceSingleSidebar = value;
+            await this.plugin.saveSettings();
+            this.plugin.applySettings();
+            this.display();
+          })
+      );
+
+    if (this.plugin.settings.enforceSingleSidebar) {
+      new Setting(containerEl)
+        .setName("Active Sidebar Side")
+        .setDesc("Select which sidebar remains active. All tabs and views from the other sidebar are moved here.")
+        .addDropdown((dropdown) =>
+          dropdown
+            .addOption("left", "Left Sidebar only")
+            .addOption("right", "Right Sidebar only")
+            .setValue(this.plugin.settings.allowedSidebarSide)
+            .onChange(async (value: "left" | "right") => {
+              this.plugin.settings.allowedSidebarSide = value;
+              await this.plugin.saveSettings();
+              this.plugin.applySettings();
+            })
+        );
+
+      new Setting(containerEl)
+        .setName("Hide Disabled Sidebar Toggle Buttons")
+        .setDesc("Hide UI icons/buttons that open the disabled sidebar.")
+        .addToggle((toggle) =>
+          toggle
+            .setValue(this.plugin.settings.hideDisabledSidebarRibbonButtons)
+            .onChange(async (value) => {
+              this.plugin.settings.hideDisabledSidebarRibbonButtons = value;
+              await this.plugin.saveSettings();
+              this.plugin.applySettings();
+            })
+        );
+    }
+
+    new Setting(containerEl)
+      .setName("Flatten Sidebar Tabs (No Top/Bottom Splits)")
+      .setDesc("Eliminate top/bottom split stacking in sidebars. Keeps all sidebar items in a single horizontal tab strip to cycle through left-to-right.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.flattenSidebarTabs)
+          .onChange(async (value) => {
+            this.plugin.settings.flattenSidebarTabs = value;
+            await this.plugin.saveSettings();
+            this.plugin.applySettings();
           })
       );
 
@@ -89,7 +163,7 @@ export class DisableFeaturesSettingTab extends PluginSettingTab {
             this.plugin.settings.disablePopoutWindows = value;
             await this.plugin.saveSettings();
             this.plugin.applySettings();
-            this.display(); // re-render to reflect state
+            this.display();
           })
       );
 
@@ -162,7 +236,7 @@ export class DisableFeaturesSettingTab extends PluginSettingTab {
             this.plugin.settings.disableSplitPanes = value;
             await this.plugin.saveSettings();
             this.plugin.applySettings();
-            this.display(); // re-render
+            this.display();
           })
       );
 

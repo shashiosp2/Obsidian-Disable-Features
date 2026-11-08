@@ -28,6 +28,7 @@ export default class DisableFeaturesPlugin extends Plugin {
 
   onunload() {
     this.unpatchAll();
+    this.cleanupBodyClasses();
   }
 
   async loadSettings() {
@@ -49,19 +50,30 @@ export default class DisableFeaturesPlugin extends Plugin {
     this.unpatches = [];
   }
 
+  private cleanupBodyClasses() {
+    document.body.classList.remove("df-hide-left-sidebar");
+    document.body.classList.remove("df-hide-right-sidebar");
+  }
+
   applySettings() {
     this.unpatchAll();
+    this.cleanupBodyClasses();
 
     this.patchMenuHandling();
     this.patchCommands();
 
+    // 1. Popouts / Floating Windows
     if (this.settings.disablePopoutWindows) {
       this.applyPopoutWindowRestrictions();
     }
 
+    // 2. Split Panes
     if (this.settings.disableSplitPanes) {
       this.applySplitPaneRestrictions();
     }
+
+    // 3. Sidebars (Single Side & Flatten Tabs)
+    this.applySidebarRestrictions();
   }
 
   private notify(msg: string) {
@@ -71,7 +83,220 @@ export default class DisableFeaturesPlugin extends Plugin {
   }
 
   /**
-   * Applies granular popout window restrictions
+   * Applies single-side sidebar enforcement and sidebar flattening (no top/bottom splits)
+   * Works on Desktop and Mobile
+   */
+  private applySidebarRestrictions() {
+    const workspace = this.app.workspace as any;
+    const plugin = this;
+
+    // Apply UI visibility CSS classes for disabled sidebar
+    if (
+      this.settings.enforceSingleSidebar &&
+      this.settings.hideDisabledSidebarRibbonButtons
+    ) {
+      if (this.settings.allowedSidebarSide === "left") {
+        document.body.classList.add("df-hide-right-sidebar");
+      } else {
+        document.body.classList.add("df-hide-left-sidebar");
+      }
+    }
+
+    // 1. Intercept getLeftLeaf and getRightLeaf
+    if (this.settings.enforceSingleSidebar) {
+      const origGetLeftLeaf = workspace.getLeftLeaf;
+      const origGetRightLeaf = workspace.getRightLeaf;
+
+      if (typeof origGetLeftLeaf === "function") {
+        workspace.getLeftLeaf = function (split?: boolean): WorkspaceLeaf | null {
+          const forceSplit = plugin.settings.flattenSidebarTabs ? false : split;
+          if (plugin.settings.allowedSidebarSide === "right") {
+            // Divert left sidebar request to right sidebar
+            return origGetRightLeaf.call(this, forceSplit);
+          }
+          return origGetLeftLeaf.call(this, forceSplit);
+        };
+        this.unpatches.push(() => {
+          workspace.getLeftLeaf = origGetLeftLeaf;
+        });
+      }
+
+      if (typeof origGetRightLeaf === "function") {
+        workspace.getRightLeaf = function (split?: boolean): WorkspaceLeaf | null {
+          const forceSplit = plugin.settings.flattenSidebarTabs ? false : split;
+          if (plugin.settings.allowedSidebarSide === "left") {
+            // Divert right sidebar request to left sidebar
+            return origGetLeftLeaf.call(this, forceSplit);
+          }
+          return origGetRightLeaf.call(this, forceSplit);
+        };
+        this.unpatches.push(() => {
+          workspace.getRightLeaf = origGetRightLeaf;
+        });
+      }
+
+      // Intercept ensureSideLeaf (Obsidian 1.7.2+)
+      if (typeof workspace.ensureSideLeaf === "function") {
+        const origEnsureSideLeaf = workspace.ensureSideLeaf;
+        workspace.ensureSideLeaf = function (
+          type: string,
+          side: "left" | "right",
+          options?: any
+        ) {
+          const targetSide = plugin.settings.allowedSidebarSide;
+          const opts = Object.assign({}, options);
+          if (plugin.settings.flattenSidebarTabs) {
+            opts.split = false;
+          }
+          return origEnsureSideLeaf.call(this, type, targetSide, opts);
+        };
+        this.unpatches.push(() => {
+          workspace.ensureSideLeaf = origEnsureSideLeaf;
+        });
+      }
+
+      // Collapse and move any leaves from the disabled side to the allowed side
+      this.consolidateSidebarLeaves();
+    }
+
+    // 2. Flatten sidebar tabs (prevent top/bottom split)
+    if (this.settings.flattenSidebarTabs) {
+      this.flattenSidebarContainers();
+
+      // Intercept layout-change to continuously enforce single tab group in sidebars
+      const layoutRef = this.app.workspace.on("layout-change", () => {
+        if (this.settings.flattenSidebarTabs) {
+          this.flattenSidebarContainers();
+        }
+        if (this.settings.enforceSingleSidebar) {
+          this.ensureDisabledSidebarCollapsed();
+        }
+      });
+      this.unpatches.push(() => {
+        this.app.workspace.offref(layoutRef);
+      });
+    }
+  }
+
+  /**
+   * Move leaves from disabled sidedock to allowed sidedock, then collapse disabled one
+   */
+  private consolidateSidebarLeaves() {
+    const workspace = this.app.workspace as any;
+    const disabledSplit =
+      this.settings.allowedSidebarSide === "left"
+        ? workspace.rightSplit
+        : workspace.leftSplit;
+
+    if (!disabledSplit) return;
+
+    // Collapse disabled sidedock/drawer
+    if (typeof disabledSplit.collapse === "function" && !disabledSplit.collapsed) {
+      disabledSplit.collapse();
+    }
+
+    // Move any leaves in disabled split to the allowed split
+    const leavesToMove: WorkspaceLeaf[] = [];
+    if (typeof disabledSplit.iterateLeaves === "function") {
+      disabledSplit.iterateLeaves((leaf: WorkspaceLeaf) => {
+        leavesToMove.push(leaf);
+      });
+    } else if (Array.isArray(disabledSplit.children)) {
+      this.collectLeavesFromContainer(disabledSplit, leavesToMove);
+    }
+
+    for (const leaf of leavesToMove) {
+      try {
+        const viewState = leaf.getViewState();
+        const targetLeaf =
+          this.settings.allowedSidebarSide === "left"
+            ? workspace.getLeftLeaf(false)
+            : workspace.getRightLeaf(false);
+        if (targetLeaf) {
+          targetLeaf.setViewState(viewState);
+          leaf.detach();
+        }
+      } catch (e) {
+        console.error("[disable-features] Error migrating sidedock leaf:", e);
+      }
+    }
+  }
+
+  /**
+   * Helper to ensure the disabled sidedock remains collapsed
+   */
+  private ensureDisabledSidebarCollapsed() {
+    const workspace = this.app.workspace as any;
+    const disabledSplit =
+      this.settings.allowedSidebarSide === "left"
+        ? workspace.rightSplit
+        : workspace.leftSplit;
+
+    if (disabledSplit && typeof disabledSplit.collapse === "function" && !disabledSplit.collapsed) {
+      disabledSplit.collapse();
+    }
+  }
+
+  /**
+   * Flatten multiple tab groups inside left/right sidedocks into a single tab container
+   * Disables top/bottom split stacking
+   */
+  private flattenSidebarContainers() {
+    const workspace = this.app.workspace as any;
+    const sidedocks = [workspace.leftSplit, workspace.rightSplit];
+
+    for (const sidedock of sidedocks) {
+      if (!sidedock || !Array.isArray(sidedock.children)) continue;
+
+      // In Obsidian desktop/mobile, a sidedock has children which are WorkspaceTabs components
+      if (sidedock.children.length > 1) {
+        // More than 1 tab group indicates a top/bottom split!
+        const primaryTabGroup = sidedock.children[0];
+        const secondaryTabGroups = sidedock.children.slice(1);
+
+        for (const extraGroup of secondaryTabGroups) {
+          const extraLeaves: WorkspaceLeaf[] = [];
+          if (Array.isArray(extraGroup.children)) {
+            extraLeaves.push(...extraGroup.children);
+          }
+
+          for (const leaf of extraLeaves) {
+            try {
+              const viewState = leaf.getViewState();
+              // Create leaf in primary tab group
+              const newLeaf = workspace.createLeafInParent(
+                primaryTabGroup,
+                primaryTabGroup.children.length
+              );
+              newLeaf.setViewState(viewState);
+              leaf.detach();
+            } catch (err) {
+              console.error("[disable-features] Error merging sidebar tabs:", err);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private collectLeavesFromContainer(
+    container: any,
+    outLeaves: WorkspaceLeaf[]
+  ) {
+    if (!container) return;
+    if (container.view) {
+      outLeaves.push(container as WorkspaceLeaf);
+      return;
+    }
+    if (Array.isArray(container.children)) {
+      for (const child of container.children) {
+        this.collectLeavesFromContainer(child, outLeaves);
+      }
+    }
+  }
+
+  /**
+   * Applies granular popout window restrictions (desktop only, safe on mobile)
    */
   private applyPopoutWindowRestrictions() {
     const workspace = this.app.workspace as any;
@@ -284,7 +509,7 @@ export default class DisableFeaturesPlugin extends Plugin {
   }
 
   /**
-   * Filter context menu items for windows and split panes
+   * Filter context menu items for windows, split panes, and sidebar toggles
    */
   private patchMenuHandling() {
     const plugin = this;
@@ -354,7 +579,7 @@ export default class DisableFeaturesPlugin extends Plugin {
   }
 
   /**
-   * Intercept command palette commands related to splitting and window creation
+   * Intercept command palette commands related to splitting, window creation, and sidebars
    */
   private patchCommands() {
     const app = this.app as any;
@@ -413,6 +638,25 @@ export default class DisableFeaturesPlugin extends Plugin {
             plugin.notify("Horizontal split command is disabled.");
           }
           return true;
+        }
+      }
+
+      // Sidebar Commands
+      if (plugin.settings.enforceSingleSidebar) {
+        if (
+          plugin.settings.allowedSidebarSide === "left" &&
+          (commandId === "app:toggle-right-sidebar" || commandId === "workspace:toggle-right-sidebar")
+        ) {
+          plugin.notify("Right sidebar is disabled.");
+          return false;
+        }
+
+        if (
+          plugin.settings.allowedSidebarSide === "right" &&
+          (commandId === "app:toggle-left-sidebar" || commandId === "workspace:toggle-left-sidebar")
+        ) {
+          plugin.notify("Left sidebar is disabled.");
+          return false;
         }
       }
 

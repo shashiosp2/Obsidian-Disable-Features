@@ -9,5 +9,7 @@
 - [x] Add initial plugin settings tab <!-- id: 6 -->
 - [x] Add granular settings breakdown for window and split pane controls <!-- id: 7 -->
 - [x] Implement individual handlers/guards based on granular settings <!-- id: 8 -->
+- [x] Implement single sidebar consolidation (Desktop & Mobile) <!-- id: 11 -->
+- [x] Implement sidebar tab flattening (no top/bottom splits) <!-- id: 12 -->
 - [x] Build and verify plugin <!-- id: 9 -->
-- [x] Commit and push granular settings update to GitHub <!-- id: 10 -->
+- [ ] Commit and push changes to GitHub <!-- id: 10 -->

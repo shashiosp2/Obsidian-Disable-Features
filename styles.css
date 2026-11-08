@@ -1,0 +1,23 @@
+/* Disable Features Plugin Styles */
+
+/* Hide disabled left/right sidedock toggle controls if configured */
+body.df-hide-left-sidebar .workspace-ribbon.mod-left,
+body.df-hide-left-sidebar .workspace-split.mod-left-split,
+body.df-hide-left-sidebar .sidebar-toggle-button.mod-left,
+body.df-hide-left-sidebar .workspace-drawer.mod-left {
+  display: none !important;
+}
+
+body.df-hide-right-sidebar .workspace-split.mod-right-split,
+body.df-hide-right-sidebar .sidebar-toggle-button.mod-right,
+body.df-hide-right-sidebar .workspace-drawer.mod-right {
+  display: none !important;
+}
+
+/* Ensure sidedock tabs display in a clean, scrollable horizontal row */
+.workspace-sidedock .workspace-tabs .workspace-tab-header-container,
+.workspace-drawer .workspace-tabs .workspace-tab-header-container {
+  overflow-x: auto !important;
+  flex-wrap: nowrap !important;
+  scrollbar-width: thin;
+}
