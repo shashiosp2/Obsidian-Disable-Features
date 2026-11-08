@@ -12,4 +12,4 @@
 - [x] Implement single sidebar consolidation (Desktop & Mobile) <!-- id: 11 -->
 - [x] Implement sidebar tab flattening (no top/bottom splits) <!-- id: 12 -->
 - [x] Build and verify plugin <!-- id: 9 -->
-- [ ] Commit and push changes to GitHub <!-- id: 10 -->
+- [x] Commit and push changes to GitHub <!-- id: 10 -->
