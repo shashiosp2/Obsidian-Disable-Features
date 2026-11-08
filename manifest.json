@@ -1,0 +1,9 @@
+{
+  "id": "obsidian-disable-features",
+  "name": "Disable Features",
+  "version": "1.0.0",
+  "minAppVersion": "1.0.0",
+  "description": "Disable specific Obsidian features such as popout windows and split panes, enforcing tabs only.",
+  "author": "shashiosp2",
+  "isDesktopOnly": false
+}

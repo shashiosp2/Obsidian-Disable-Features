@@ -1,0 +1,5 @@
+node_modules
+main.js
+*.hot-update.json
+*.hot-update.js
+.DS_Store
